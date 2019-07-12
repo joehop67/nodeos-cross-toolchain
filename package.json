@@ -1,6 +1,6 @@
 {
   "name": "nodeos-cross-toolchain",
-  "version": "1.0.0-RC3.1",
+  "version": "v2.1.0-SIN",
   "description": "Cross-toolchain to build NodeOS based on Compressed Linux From Scratch Embedded",
   "bin": {
     "addr2line": "bin/addr2line",
@@ -33,7 +33,8 @@
     "prebuild": "scripts/prebuild",
     "prepublish": "scripts/prepublish",
     "test": "scripts/test",
-    "unbuild": "scripts/unbuild"
+    "unbuild": "scripts/unbuild",
+    "tst": "scripts/tst"
   },
   "keywords": [
     "NodeOS",
@@ -58,20 +59,20 @@
     "fs-extra"
   ],
   "devDependencies": {
-    "async": "^2.1.4",
+    "async": "^2.6.2",
     "ci-publish": "^1.3.0",
-    "download-manager": "^0.1.3",
+    "download-manager": "^0.1.4",
     "fs-extra": "^5.0.0",
-    "nodeos-linux": "^4.15.10",
+    "nodeos-linux": "joehop67/nodeos-linux",
     "prebuild": "^7.4.0"
   },
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NodeOS/nodeos-cross-toolchain.git"
+    "url": "git+https://github.com/joehop67/nodeos-cross-toolchain.git"
   },
   "bugs": {
-    "url": "https://github.com/NodeOS/nodeos-cross-toolchain/issues"
+    "url": "https://github.com/joehop67/nodeos-cross-toolchain/issues"
   },
-  "homepage": "https://github.com/NodeOS/nodeos-cross-toolchain#readme"
+  "homepage": "https://github.com/joehop67/nodeos-cross-toolchain#readme"
 }

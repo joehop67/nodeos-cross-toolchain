@@ -3,7 +3,7 @@
 set -o pipefail
 
 
-DOWNLOAD=https://github.com/NodeOS/nodeos-cross-toolchain/releases/download/v{version}/{platform}-{arch}.tar.gz
+DOWNLOAD=https://github.com/joehop67/nodeos-cross-toolchain/releases/download/v{version}/{platform}-{arch}.tar.gz
 
 
 #

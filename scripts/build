@@ -117,7 +117,7 @@ if [[ ! -d $STEP_DIR ]]; then
 
   (
     mkdir -p $STEP_DIR &&
-    cd       $STEP_DIR || exit 30
+    cd       $STEP_DIR || exit 30h
 
     # Configure
     $SRC_DIR/configure                        \

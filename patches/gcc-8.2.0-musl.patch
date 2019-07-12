@@ -1,0 +1,867 @@
+diff --git a/gcc/gcc.c b/gcc/gcc.c
+index a716f708259..eb1610ba8b0 100644
+--- a/gcc/gcc.c
++++ b/gcc/gcc.c
+@@ -870,7 +870,8 @@ proper position among the other output files.  */
+ #ifndef LINK_SSP_SPEC
+ #ifdef TARGET_LIBC_PROVIDES_SSP
+ #define LINK_SSP_SPEC "%{fstack-protector|fstack-protector-all" \
+-		       "|fstack-protector-strong|fstack-protector-explicit:}"
++		       "|fstack-protector-strong|fstack-protector-explicit" \
++		       ":-lssp_nonshared}"
+ #else
+ #define LINK_SSP_SPEC "%{fstack-protector|fstack-protector-all" \
+ 		       "|fstack-protector-strong|fstack-protector-explicit" \
+diff --git a/gcc/config/i386/pmm_malloc.h b/gcc/config/i386/pmm_malloc.h
+index ffbb7f82cf5..b0b890d2403 100644
+--- a/gcc/config/i386/pmm_malloc.h
++++ b/gcc/config/i386/pmm_malloc.h
+@@ -27,12 +27,13 @@
+ #include <stdlib.h>
+ 
+ /* We can't depend on <stdlib.h> since the prototype of posix_memalign
+-   may not be visible.  */
++   may not be visible and we can't pollute the namespace either.  */
+ #ifndef __cplusplus
+-extern int posix_memalign (void **, size_t, size_t);
++extern int _mm_posix_memalign (void **, size_t, size_t)
+ #else
+-extern "C" int posix_memalign (void **, size_t, size_t) throw ();
++extern "C" int _mm_posix_memalign (void **, size_t, size_t) throw ()
+ #endif
++__asm__("posix_memalign");
+ 
+ static __inline void *
+ _mm_malloc (size_t __size, size_t __alignment)
+@@ -42,7 +43,7 @@ _mm_malloc (size_t __size, size_t __alignment)
+     return malloc (__size);
+   if (__alignment == 2 || (sizeof (void *) == 8 && __alignment == 4))
+     __alignment = sizeof (void *);
+-  if (posix_memalign (&__ptr, __alignment, __size) == 0)
++  if (_mm_posix_memalign (&__ptr, __alignment, __size) == 0)
+     return __ptr;
+   else
+     return NULL;
+diff --git a/libatomic/testsuite/Makefile.am b/libatomic/testsuite/Makefile.am
+index a9a0144185a..a19101aac54 100644
+--- a/libatomic/testsuite/Makefile.am
++++ b/libatomic/testsuite/Makefile.am
+@@ -11,3 +11,9 @@ EXPECT = $(shell if test -f $(top_builddir)/../expect/expect; then \
+ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
++
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
+diff --git a/libatomic/testsuite/Makefile.in b/libatomic/testsuite/Makefile.in
+index 0a7ac4b4dc7..704db219fa3 100644
+--- a/libatomic/testsuite/Makefile.in
++++ b/libatomic/testsuite/Makefile.in
+@@ -226,6 +226,7 @@ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ 
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
+ all: all-am
+ 
+ .SUFFIXES:
+@@ -432,6 +433,10 @@ uninstall-am:
+ 	uninstall uninstall-am
+ 
+ 
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
++
+ # Tell versions [3.59,3.63) of GNU make to not export all variables.
+ # Otherwise a system limit (for SysV at least) may be exceeded.
+ .NOEXPORT:
+diff --git a/libatomic/testsuite/lib/libatomic.exp b/libatomic/testsuite/lib/libatomic.exp
+index 0a53f9e11f1..51b35919f2d 100644
+--- a/libatomic/testsuite/lib/libatomic.exp
++++ b/libatomic/testsuite/lib/libatomic.exp
+@@ -75,6 +75,7 @@ proc libatomic_init { args } {
+     global ALWAYS_CFLAGS
+     global CFLAGS
+     global TOOL_EXECUTABLE TOOL_OPTIONS
++    global BUILD_CC
+     global GCC_UNDER_TEST
+     global TESTING_IN_BUILD_TREE
+     global target_triplet
+@@ -90,6 +91,8 @@ proc libatomic_init { args } {
+     if ![info exists GCC_UNDER_TEST] then {
+ 	if [info exists TOOL_EXECUTABLE] {
+ 	    set GCC_UNDER_TEST $TOOL_EXECUTABLE
++	} elseif [info exists BUILD_CC] {
++	    set GCC_UNDER_TEST $BUILD_CC
+ 	} else {
+ 	    set GCC_UNDER_TEST "[find_gcc]"
+ 	}
+diff --git a/libgomp/testsuite/Makefile.am b/libgomp/testsuite/Makefile.am
+index e2a3f460eb0..3309f71e02e 100644
+--- a/libgomp/testsuite/Makefile.am
++++ b/libgomp/testsuite/Makefile.am
+@@ -12,6 +12,11 @@ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
+ 
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
++
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
+ 
+ # Instead of directly in ../testsuite/libgomp-test-support.exp.in, the
+ # following variables have to be "routed through" this Makefile, for expansion
+diff --git a/libgomp/testsuite/Makefile.in b/libgomp/testsuite/Makefile.in
+index 9310138c32c..4c0cc0a3013 100644
+--- a/libgomp/testsuite/Makefile.in
++++ b/libgomp/testsuite/Makefile.in
+@@ -254,6 +254,7 @@ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ 
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
+ all: all-am
+ 
+ .SUFFIXES:
+@@ -462,6 +463,10 @@ uninstall-am:
+ 	ps ps-am uninstall uninstall-am
+ 
+ 
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
++
+ # Instead of directly in ../testsuite/libgomp-test-support.exp.in, the
+ # following variables have to be "routed through" this Makefile, for expansion
+ # of the several (Makefile) variables used therein.
+diff --git a/libgomp/testsuite/lib/libgomp.exp b/libgomp/testsuite/lib/libgomp.exp
+index ea3da2cb383..e7df78916ea 100644
+--- a/libgomp/testsuite/lib/libgomp.exp
++++ b/libgomp/testsuite/lib/libgomp.exp
+@@ -86,6 +86,7 @@ proc libgomp_init { args } {
+     global ALWAYS_CFLAGS
+     global CFLAGS
+     global TOOL_EXECUTABLE TOOL_OPTIONS
++    global BUILD_CC
+     global GCC_UNDER_TEST
+     global TESTING_IN_BUILD_TREE
+     global target_triplet
+@@ -108,6 +109,8 @@ proc libgomp_init { args } {
+     if ![info exists GCC_UNDER_TEST] then {
+ 	if [info exists TOOL_EXECUTABLE] {
+ 	    set GCC_UNDER_TEST $TOOL_EXECUTABLE
++	} elseif [info exists BUILD_CC] {
++	    set GCC_UNDER_TEST $BUILD_CC
+ 	} else {
+ 	    set GCC_UNDER_TEST "[find_gcc]"
+ 	}
+diff --git a/libitm/testsuite/Makefile.am b/libitm/testsuite/Makefile.am
+index a9a0144185a..a19101aac54 100644
+--- a/libitm/testsuite/Makefile.am
++++ b/libitm/testsuite/Makefile.am
+@@ -11,3 +11,9 @@ EXPECT = $(shell if test -f $(top_builddir)/../expect/expect; then \
+ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
++
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
+diff --git a/libitm/testsuite/Makefile.in b/libitm/testsuite/Makefile.in
+index 34dcdd2dae0..458932c315d 100644
+--- a/libitm/testsuite/Makefile.in
++++ b/libitm/testsuite/Makefile.in
+@@ -234,6 +234,7 @@ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ 
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
+ all: all-am
+ 
+ .SUFFIXES:
+@@ -440,6 +441,10 @@ uninstall-am:
+ 	uninstall uninstall-am
+ 
+ 
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
++
+ # Tell versions [3.59,3.63) of GNU make to not export all variables.
+ # Otherwise a system limit (for SysV at least) may be exceeded.
+ .NOEXPORT:
+diff --git a/libitm/testsuite/lib/libitm.exp b/libitm/testsuite/lib/libitm.exp
+index b3c7eb94f94..5f06cb6c50e 100644
+--- a/libitm/testsuite/lib/libitm.exp
++++ b/libitm/testsuite/lib/libitm.exp
+@@ -75,6 +75,7 @@ proc libitm_init { args } {
+     global ALWAYS_CFLAGS
+     global CFLAGS
+     global TOOL_EXECUTABLE TOOL_OPTIONS
++    global BUILD_CC
+     global GCC_UNDER_TEST
+     global TESTING_IN_BUILD_TREE
+     global target_triplet
+@@ -90,6 +91,8 @@ proc libitm_init { args } {
+     if ![info exists GCC_UNDER_TEST] then {
+ 	if [info exists TOOL_EXECUTABLE] {
+ 	    set GCC_UNDER_TEST $TOOL_EXECUTABLE
++	} elseif [info exists BUILD_CC] {
++	    set GCC_UNDER_TEST $BUILD_CC
+ 	} else {
+ 	    set GCC_UNDER_TEST "[find_gcc]"
+ 	}
+diff --git a/libvtv/testsuite/Makefile.am b/libvtv/testsuite/Makefile.am
+index a9a0144185a..a19101aac54 100644
+--- a/libvtv/testsuite/Makefile.am
++++ b/libvtv/testsuite/Makefile.am
+@@ -11,3 +11,9 @@ EXPECT = $(shell if test -f $(top_builddir)/../expect/expect; then \
+ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
++
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
+diff --git a/libvtv/testsuite/Makefile.in b/libvtv/testsuite/Makefile.in
+index f6314708e9f..cd281ac1ff7 100644
+--- a/libvtv/testsuite/Makefile.in
++++ b/libvtv/testsuite/Makefile.in
+@@ -229,6 +229,7 @@ _RUNTEST = $(shell if test -f $(top_srcdir)/../dejagnu/runtest; then \
+ 	     echo $(top_srcdir)/../dejagnu/runtest; else echo runtest; fi)
+ 
+ RUNTEST = "$(_RUNTEST) $(AM_RUNTESTFLAGS)"
++EXTRA_DEJAGNU_SITE_CONFIG = extra.exp
+ all: all-am
+ 
+ .SUFFIXES:
+@@ -435,6 +436,10 @@ uninstall-am:
+ 	uninstall uninstall-am
+ 
+ 
++extra.exp:
++	echo 'set BUILD_CC "$(CC)"' > $@.tmp
++	mv $@.tmp $@
++
+ # Tell versions [3.59,3.63) of GNU make to not export all variables.
+ # Otherwise a system limit (for SysV at least) may be exceeded.
+ .NOEXPORT:
+diff --git a/libvtv/testsuite/lib/libvtv.exp b/libvtv/testsuite/lib/libvtv.exp
+index edf5fddbad2..a596091573b 100644
+--- a/libvtv/testsuite/lib/libvtv.exp
++++ b/libvtv/testsuite/lib/libvtv.exp
+@@ -74,6 +74,7 @@ proc libvtv_init { args } {
+     global ALWAYS_CFLAGS
+     global CFLAGS
+     global TOOL_EXECUTABLE TOOL_OPTIONS
++    global BUILD_CC
+     global GCC_UNDER_TEST
+     global TESTING_IN_BUILD_TREE
+     global target_triplet
+@@ -89,6 +90,8 @@ proc libvtv_init { args } {
+     if ![info exists GCC_UNDER_TEST] then {
+ 	if [info exists TOOL_EXECUTABLE] {
+ 	    set GCC_UNDER_TEST $TOOL_EXECUTABLE
++	} elseif [info exists BUILD_CC] {
++	    set GCC_UNDER_TEST $BUILD_CC
+ 	} else {
+ 	    set GCC_UNDER_TEST "[find_gcc]"
+ 	}
+diff --git a/gcc/config.gcc b/gcc/config.gcc
+index 532c33f4c2b..20cdc192b82 100644
+--- a/gcc/config.gcc
++++ b/gcc/config.gcc
+@@ -505,7 +505,7 @@ s390*-*-*)
+ 	extra_headers="s390intrin.h htmintrin.h htmxlintrin.h vecintrin.h"
+ 	;;
+ # Note the 'l'; we need to be able to match e.g. "shle" or "shl".
+-sh[123456789lbe]*-*-* | sh-*-*)
++sh[123456789lbej]*-*-* | sh-*-*)
+ 	cpu_type=sh
+ 	extra_options="${extra_options} fused-madd.opt"
+ 	extra_objs="${extra_objs} sh_treg_combine.o sh-mem.o sh_optimize_sett_clrt.o"
+@@ -2725,18 +2725,18 @@ s390x-ibm-tpf*)
+ 	extra_options="${extra_options} s390/tpf.opt"
+ 	tmake_file="${tmake_file} s390/t-s390"
+ 	;;
+-sh-*-elf* | sh[12346l]*-*-elf* | \
+-  sh-*-linux* | sh[2346lbe]*-*-linux* | \
++sh-*-elf* | sh[12346lj]*-*-elf* | \
++  sh-*-linux* | sh[2346lbej]*-*-linux* | \
+   sh-*-netbsdelf* | shl*-*-netbsdelf*)
+ 	tmake_file="${tmake_file} sh/t-sh sh/t-elf"
+ 	if test x${with_endian} = x; then
+ 		case ${target} in
+-		sh[1234]*be-*-* | sh[1234]*eb-*-*) with_endian=big ;;
++		sh[j1234]*be-*-* | sh[j1234]*eb-*-*) with_endian=big ;;
+ 		shbe-*-* | sheb-*-*)		   with_endian=big,little ;;
+ 		sh[1234]l* | sh[34]*-*-linux*)	   with_endian=little ;;
+ 		shl* | sh*-*-linux* | \
+ 		  sh-superh-elf)		   with_endian=little,big ;;
+-		sh[1234]*-*-*)			   with_endian=big ;;
++		sh[j1234]*-*-*)			   with_endian=big ;;
+ 		*)				   with_endian=big,little ;;
+ 		esac
+ 	fi
+@@ -2803,6 +2803,7 @@ sh-*-elf* | sh[12346l]*-*-elf* | \
+ 	sh2a_nofpu*)		sh_cpu_target=sh2a-nofpu ;;
+ 	sh2a*)			sh_cpu_target=sh2a ;;
+ 	sh2e*)			sh_cpu_target=sh2e ;;
++	shj2*)			sh_cpu_target=shj2;;
+ 	sh2*)			sh_cpu_target=sh2 ;;
+ 	*)			sh_cpu_target=sh1 ;;
+ 	esac
+@@ -2824,7 +2825,7 @@ sh-*-elf* | sh[12346l]*-*-elf* | \
+ 	  sh2a-single-only | sh2a-single | sh2a-nofpu | sh2a | \
+ 	  sh4a-single-only | sh4a-single | sh4a-nofpu | sh4a | sh4al | \
+ 	  sh4-single-only | sh4-single | sh4-nofpu | sh4 | sh4-300 | \
+-	  sh3e | sh3 | sh2e | sh2 | sh1) ;;
++	  sh3e | sh3 | sh2e | sh2 | sh1 | shj2) ;;
+ 	"")	sh_cpu_default=${sh_cpu_target} ;;
+ 	*)	echo "with_cpu=$with_cpu not supported"; exit 1 ;;
+ 	esac
+@@ -2833,9 +2834,9 @@ sh-*-elf* | sh[12346l]*-*-elf* | \
+ 		case ${target} in
+ 		sh[1234]*)	sh_multilibs=${sh_cpu_target} ;;
+ 		sh-superh-*)	sh_multilibs=m4,m4-single,m4-single-only,m4-nofpu ;;
+-		sh*-*-linux*)	sh_multilibs=m1,m2,m2a,m3e,m4 ;;
++		sh*-*-linux*)	sh_multilibs=m1,m2,m2a,m3e,m4,mj2 ;;
+ 		sh*-*-netbsd*)	sh_multilibs=m3,m3e,m4 ;;
+-		*) sh_multilibs=m1,m2,m2e,m4,m4-single,m4-single-only,m2a,m2a-single ;;
++		*) sh_multilibs=m1,m2,m2e,m4,m4-single,m4-single-only,m2a,m2a-single,mj2 ;;
+ 		esac
+ 		if test x$with_fp = xno; then
+ 			sh_multilibs="`echo $sh_multilibs|sed -e s/m4/sh4-nofpu/ -e s/,m4-[^,]*//g -e s/,m[23]e// -e s/m2a,m2a-single/m2a-nofpu/ -e s/m5-..m....,//g`"
+@@ -2850,7 +2851,8 @@ sh-*-elf* | sh[12346l]*-*-elf* | \
+ 		m1 | m2 | m2e | m3 | m3e | \
+ 		m4 | m4-single | m4-single-only | m4-nofpu | m4-300 |\
+ 		m4a | m4a-single | m4a-single-only | m4a-nofpu | m4al | \
+-		m2a | m2a-single | m2a-single-only | m2a-nofpu)
++		m2a | m2a-single | m2a-single-only | m2a-nofpu | \
++		mj2)
+ 			# TM_MULTILIB_CONFIG is used by t-sh for the non-endian multilib definition
+ 			# It is passed to MULTIILIB_OPTIONS verbatim.
+ 			TM_MULTILIB_CONFIG="${TM_MULTILIB_CONFIG}/${sh_multilib}"
+@@ -2867,7 +2869,7 @@ sh-*-elf* | sh[12346l]*-*-elf* | \
+ 	done
+ 	TM_MULTILIB_CONFIG=`echo $TM_MULTILIB_CONFIG | sed 's:^/::'`
+ 	if test x${enable_incomplete_targets} = xyes ; then
+-		tm_defines="$tm_defines SUPPORT_SH1=1 SUPPORT_SH2E=1 SUPPORT_SH4=1 SUPPORT_SH4_SINGLE=1 SUPPORT_SH2A=1 SUPPORT_SH2A_SINGLE=1"
++		tm_defines="$tm_defines SUPPORT_SH1=1 SUPPORT_SH2E=1 SUPPORT_SH4=1 SUPPORT_SH4_SINGLE=1 SUPPORT_SH2A=1 SUPPORT_SH2A_SINGLE=1 SUPPORT_SHJ2=1"
+ 	fi
+ 	tm_file="$tm_file ./sysroot-suffix.h"
+ 	tmake_file="$tmake_file t-sysroot-suffix"
+@@ -4518,6 +4520,8 @@ case "${target}" in
+ 			;;
+ 		m4a | m4a-single | m4a-single-only | m4a-nofpu | m4al)
+ 		        ;;
++		mj2)
++			;;
+ 		*)
+ 			echo "Unknown CPU used in --with-cpu=$with_cpu, known values:"  1>&2
+ 			echo "m1 m2 m2e m3 m3e m4 m4-single m4-single-only m4-nofpu" 1>&2
+@@ -4729,7 +4733,7 @@ case ${target} in
+ 		tmake_file="${cpu_type}/t-${cpu_type} ${tmake_file}"
+ 		;;
+ 
+-	sh[123456ble]*-*-* | sh-*-*)
++	sh[123456blej]*-*-* | sh-*-*)
+ 		c_target_objs="${c_target_objs} sh-c.o"
+ 		cxx_target_objs="${cxx_target_objs} sh-c.o"
+ 		;;
+diff --git a/gcc/config/sh/sh.c b/gcc/config/sh/sh.c
+index ced66408265..c51b00d8e8b 100644
+--- a/gcc/config/sh/sh.c
++++ b/gcc/config/sh/sh.c
+@@ -685,6 +685,7 @@ parse_validate_atomic_model_option (const char* str)
+   model_names[sh_atomic_model::hard_llcs] = "hard-llcs";
+   model_names[sh_atomic_model::soft_tcb] = "soft-tcb";
+   model_names[sh_atomic_model::soft_imask] = "soft-imask";
++  model_names[sh_atomic_model::hard_cas] = "hard-cas";
+ 
+   const char* model_cdef_names[sh_atomic_model::num_models];
+   model_cdef_names[sh_atomic_model::none] = "NONE";
+@@ -692,6 +693,7 @@ parse_validate_atomic_model_option (const char* str)
+   model_cdef_names[sh_atomic_model::hard_llcs] = "HARD_LLCS";
+   model_cdef_names[sh_atomic_model::soft_tcb] = "SOFT_TCB";
+   model_cdef_names[sh_atomic_model::soft_imask] = "SOFT_IMASK";
++  model_cdef_names[sh_atomic_model::hard_cas] = "HARD_CAS";
+ 
+   sh_atomic_model ret;
+   ret.type = sh_atomic_model::none;
+@@ -770,6 +772,9 @@ got_mode_name:;
+   if (ret.type == sh_atomic_model::soft_imask && TARGET_USERMODE)
+     err_ret ("cannot use atomic model %s in user mode", ret.name);
+ 
++  if (ret.type == sh_atomic_model::hard_cas && !TARGET_SHJ2)
++    err_ret ("atomic model %s is only available J2 targets", ret.name);
++
+   return ret;
+ 
+ #undef err_ret
+@@ -826,6 +831,8 @@ sh_option_override (void)
+     sh_cpu = PROCESSOR_SH2E;
+   if (TARGET_SH2A)
+     sh_cpu = PROCESSOR_SH2A;
++  if (TARGET_SHJ2)
++    sh_cpu = PROCESSOR_SHJ2;
+   if (TARGET_SH3)
+     sh_cpu = PROCESSOR_SH3;
+   if (TARGET_SH3E)
+diff --git a/gcc/config/sh/sh.h b/gcc/config/sh/sh.h
+index 2f5930bbebd..5a6d113a011 100644
+--- a/gcc/config/sh/sh.h
++++ b/gcc/config/sh/sh.h
+@@ -83,6 +83,7 @@ extern int code_for_indirect_jump_scratch;
+ #define SUPPORT_SH4_SINGLE 1
+ #define SUPPORT_SH2A 1
+ #define SUPPORT_SH2A_SINGLE 1
++#define SUPPORT_SHJ2 1
+ #endif
+ 
+ #define TARGET_DIVIDE_CALL_DIV1 (sh_div_strategy == SH_DIV_CALL_DIV1)
+@@ -115,6 +116,7 @@ extern int code_for_indirect_jump_scratch;
+ #define SELECT_SH4A_SINGLE_ONLY  (MASK_SH4A | SELECT_SH4_SINGLE_ONLY)
+ #define SELECT_SH4A		 (MASK_SH4A | SELECT_SH4)
+ #define SELECT_SH4A_SINGLE	 (MASK_SH4A | SELECT_SH4_SINGLE)
++#define SELECT_SHJ2		 (MASK_SHJ2 | SELECT_SH2)
+ 
+ #if SUPPORT_SH1
+ #define SUPPORT_SH2 1
+@@ -122,6 +124,7 @@ extern int code_for_indirect_jump_scratch;
+ #if SUPPORT_SH2
+ #define SUPPORT_SH3 1
+ #define SUPPORT_SH2A_NOFPU 1
++#define SUPPORT_SHJ2 1
+ #endif
+ #if SUPPORT_SH3
+ #define SUPPORT_SH4_NOFPU 1
+@@ -154,7 +157,7 @@ extern int code_for_indirect_jump_scratch;
+ #define MASK_ARCH (MASK_SH1 | MASK_SH2 | MASK_SH3 | MASK_SH_E | MASK_SH4 \
+ 		   | MASK_HARD_SH2A | MASK_HARD_SH2A_DOUBLE | MASK_SH4A \
+ 		   | MASK_HARD_SH4 | MASK_FPU_SINGLE \
+-		   | MASK_FPU_SINGLE_ONLY)
++		   | MASK_FPU_SINGLE_ONLY | MASK_SHJ2)
+ 
+ /* This defaults us to big-endian.  */
+ #ifndef TARGET_ENDIAN_DEFAULT
+@@ -229,7 +232,8 @@ extern int code_for_indirect_jump_scratch;
+ %{m2a-single:--isa=sh2a} \
+ %{m2a-single-only:--isa=sh2a} \
+ %{m2a-nofpu:--isa=sh2a-nofpu} \
+-%{m4al:-dsp}"
++%{m4al:-dsp} \
++%{mj2:-isa=j2}"
+ 
+ #define ASM_SPEC SH_ASM_SPEC
+ 
+@@ -345,6 +349,7 @@ struct sh_atomic_model
+     hard_llcs,
+     soft_tcb,
+     soft_imask,
++    hard_cas,
+ 
+     num_models
+   };
+@@ -388,6 +393,9 @@ extern const sh_atomic_model& selected_atomic_model (void);
+ #define TARGET_ATOMIC_SOFT_IMASK \
+   (selected_atomic_model ().type == sh_atomic_model::soft_imask)
+ 
++#define TARGET_ATOMIC_HARD_CAS \
++  (selected_atomic_model ().type == sh_atomic_model::hard_cas)
++
+ #endif // __cplusplus
+ 
+ #define SUBTARGET_OVERRIDE_OPTIONS (void) 0
+@@ -1521,7 +1529,7 @@ extern bool current_function_interrupt;
+ 
+ /* Nonzero if the target supports dynamic shift instructions
+    like shad and shld.  */
+-#define TARGET_DYNSHIFT (TARGET_SH3 || TARGET_SH2A)
++#define TARGET_DYNSHIFT (TARGET_SH3 || TARGET_SH2A || TARGET_SHJ2)
+ 
+ /* The cost of using the dynamic shift insns (shad, shld) are the same
+    if they are available.  If they are not available a library function will
+@@ -1784,6 +1792,7 @@ enum processor_type {
+   PROCESSOR_SH2,
+   PROCESSOR_SH2E,
+   PROCESSOR_SH2A,
++  PROCESSOR_SHJ2,
+   PROCESSOR_SH3,
+   PROCESSOR_SH3E,
+   PROCESSOR_SH4,
+diff --git a/gcc/config/sh/sh.opt b/gcc/config/sh/sh.opt
+index 837d9bfdc23..86b2cd6fc79 100644
+--- a/gcc/config/sh/sh.opt
++++ b/gcc/config/sh/sh.opt
+@@ -65,6 +65,10 @@ m2e
+ Target RejectNegative Condition(SUPPORT_SH2E)
+ Generate SH2e code.
+ 
++mj2
++Target RejectNegative Mask(SHJ2) Condition(SUPPORT_SHJ2)
++Generate J2 code.
++
+ m3
+ Target RejectNegative Mask(SH3) Condition(SUPPORT_SH3)
+ Generate SH3 code.
+diff --git a/gcc/config/sh/sync.md b/gcc/config/sh/sync.md
+index 9dba513e642..5bc8acabf2f 100644
+--- a/gcc/config/sh/sync.md
++++ b/gcc/config/sh/sync.md
+@@ -240,6 +240,9 @@
+       || (TARGET_SH4A && <MODE>mode == SImode && !TARGET_ATOMIC_STRICT))
+     atomic_insn = gen_atomic_compare_and_swap<mode>_hard (old_val, mem,
+ 							  exp_val, new_val);
++  else if (TARGET_ATOMIC_HARD_CAS && <MODE>mode == SImode)
++    atomic_insn = gen_atomic_compare_and_swap<mode>_cas (old_val, mem,
++							 exp_val, new_val);
+   else if (TARGET_ATOMIC_SOFT_GUSA)
+     atomic_insn = gen_atomic_compare_and_swap<mode>_soft_gusa (old_val, mem,
+ 		      exp_val, new_val);
+@@ -306,6 +309,57 @@
+ }
+   [(set_attr "length" "14")])
+ 
++(define_expand "atomic_compare_and_swapsi_cas"
++  [(set (match_operand:SI 0 "register_operand" "=r")
++	(unspec_volatile:SI
++	  [(match_operand:SI 1 "atomic_mem_operand_0" "=Sra")
++	   (match_operand:SI 2 "register_operand" "r")
++	   (match_operand:SI 3 "register_operand" "r")]
++	  UNSPECV_CMPXCHG_1))]
++  "TARGET_ATOMIC_HARD_CAS"
++{
++  rtx mem = gen_rtx_REG (SImode, 0);
++  emit_move_insn (mem, force_reg (SImode, XEXP (operands[1], 0)));
++  emit_insn (gen_shj2_cas (operands[0], mem, operands[2], operands[3]));
++  DONE;
++})
++
++(define_insn "shj2_cas"
++  [(set (match_operand:SI 0 "register_operand" "=&r")
++  (unspec_volatile:SI
++   [(match_operand:SI 1 "register_operand" "=r")
++   (match_operand:SI 2 "register_operand" "r")
++   (match_operand:SI 3 "register_operand" "0")]
++   UNSPECV_CMPXCHG_1))
++   (set (reg:SI T_REG)
++	(unspec_volatile:SI [(const_int 0)] UNSPECV_CMPXCHG_3))]
++  "TARGET_ATOMIC_HARD_CAS"
++  "cas.l	%2,%0,@%1"
++  [(set_attr "length" "2")]
++)
++
++(define_expand "atomic_compare_and_swapqi_cas"
++  [(set (match_operand:SI 0 "arith_reg_dest" "=&r")
++	(unspec_volatile:SI
++	  [(match_operand:SI 1 "atomic_mem_operand_0" "=Sra")
++	   (match_operand:SI 2 "arith_operand" "rI08")
++	   (match_operand:SI 3 "arith_operand" "rI08")]
++	  UNSPECV_CMPXCHG_1))]
++  "TARGET_ATOMIC_HARD_CAS"
++{FAIL;}
++)
++
++(define_expand "atomic_compare_and_swaphi_cas"
++  [(set (match_operand:SI 0 "arith_reg_dest" "=&r")
++	(unspec_volatile:SI
++	  [(match_operand:SI 1 "atomic_mem_operand_0" "=Sra")
++	   (match_operand:SI 2 "arith_operand" "rI08")
++	   (match_operand:SI 3 "arith_operand" "rI08")]
++	  UNSPECV_CMPXCHG_1))]
++  "TARGET_ATOMIC_HARD_CAS"
++{FAIL;}
++)
++
+ ;; The QIHImode llcs patterns modify the address register of the memory
+ ;; operand.  In order to express that, we have to open code the memory
+ ;; operand.  Initially the insn is expanded like every other atomic insn
+diff --git a/gcc/config/sh/t-sh b/gcc/config/sh/t-sh
+index a78c6a55127..386934dca8a 100644
+--- a/gcc/config/sh/t-sh
++++ b/gcc/config/sh/t-sh
+@@ -50,7 +50,8 @@ MULTILIB_MATCHES = $(shell \
+              m2e,m3e,m4-single-only,m4-100-single-only,m4-200-single-only,m4-300-single-only,m4a-single-only \
+              m2a-single,m2a-single-only \
+              m4-single,m4-100-single,m4-200-single,m4-300-single,m4a-single \
+-             m4,m4-100,m4-200,m4-300,m4a; do \
++             m4,m4-100,m4-200,m4-300,m4a \
++             mj2; do \
+     subst= ; \
+     for lib in `echo $$abi|tr , ' '` ; do \
+       if test "`echo $$multilibs|sed s/$$lib//`" != "$$multilibs"; then \
+@@ -63,9 +64,9 @@ MULTILIB_MATCHES = $(shell \
+ 
+ # SH1 and SH2A support big endian only.
+ ifeq ($(DEFAULT_ENDIAN),ml)
+-MULTILIB_EXCEPTIONS = m1 ml/m1 m2a* ml/m2a* $(TM_MULTILIB_EXCEPTIONS_CONFIG)
++MULTILIB_EXCEPTIONS = m1 ml/m1 m2a* ml/m2a* ml/mj2 $(TM_MULTILIB_EXCEPTIONS_CONFIG)
+ else
+-MULTILIB_EXCEPTIONS = ml/m1 ml/m2a* $(TM_MULTILIB_EXCEPTIONS_CONFIG)
++MULTILIB_EXCEPTIONS = ml/m1 ml/m2a* ml/mj2 $(TM_MULTILIB_EXCEPTIONS_CONFIG)
+ endif
+ 
+ MULTILIB_OSDIRNAMES = \
+@@ -87,7 +88,8 @@ MULTILIB_OSDIRNAMES = \
+ 	m4a-single-only=!m4a-single-only $(OTHER_ENDIAN)/m4a-single-only=!$(OTHER_ENDIAN)/m4a-single-only \
+ 	m4a-single=!m4a-single $(OTHER_ENDIAN)/m4a-single=!$(OTHER_ENDIAN)/m4a-single \
+ 	m4a=!m4a $(OTHER_ENDIAN)/m4a=!$(OTHER_ENDIAN)/m4a \
+-	m4al=!m4al $(OTHER_ENDIAN)/m4al=!$(OTHER_ENDIAN)/m4al
++	m4al=!m4al $(OTHER_ENDIAN)/m4al=!$(OTHER_ENDIAN)/m4al \
++	mj2=!j2
+ 
+ $(out_object_file): gt-sh.h
+ gt-sh.h : s-gtype ; @true
+diff --git a/gcc/config/s390/linux.h b/gcc/config/s390/linux.h
+index 525c17c2c9f..2d4f4a0654e 100644
+--- a/gcc/config/s390/linux.h
++++ b/gcc/config/s390/linux.h
+@@ -76,6 +76,9 @@ along with GCC; see the file COPYING3.  If not see
+ #define GLIBC_DYNAMIC_LINKER32 "/lib/ld.so.1"
+ #define GLIBC_DYNAMIC_LINKER64 "/lib/ld64.so.1"
+ 
++#define MUSL_DYNAMIC_LINKER32 "/lib/ld-musl-s390.so.1"
++#define MUSL_DYNAMIC_LINKER64 "/lib/ld-musl-s390x.so.1"
++
+ #undef  LINK_SPEC
+ #define LINK_SPEC \
+   "%{m31:-m elf_s390}%{m64:-m elf64_s390} \
+diff --git a/gcc/config/microblaze/microblaze.c b/gcc/config/microblaze/microblaze.c
+index 9a4a287be23..60aadaf51f7 100644
+--- a/gcc/config/microblaze/microblaze.c
++++ b/gcc/config/microblaze/microblaze.c
+@@ -2399,7 +2399,7 @@ print_operand (FILE * file, rtx op, int letter)
+ 	  unsigned long value_long;
+ 	  REAL_VALUE_TO_TARGET_SINGLE (*CONST_DOUBLE_REAL_VALUE (op),
+ 				       value_long);
+-	  fprintf (file, HOST_WIDE_INT_PRINT_HEX, value_long);
++	  fprintf (file, "0x%lx", value_long);
+ 	}
+       else
+ 	{
+@@ -2458,7 +2458,7 @@ print_operand (FILE * file, rtx op, int letter)
+       print_operand_address (file, XEXP (op, 0));
+     }
+   else if (letter == 'm')
+-    fprintf (file, HOST_WIDE_INT_PRINT_DEC, (1L << INTVAL (op)));
++    fprintf (file, "%ld", (1L << INTVAL (op)));
+   else
+     output_addr_const (file, op);
+ }
+diff --git a/gcc/configure b/gcc/configure
+index 6121e163259..07ff8597d48 100755
+--- a/gcc/configure
++++ b/gcc/configure
+@@ -29309,6 +29309,15 @@ if test "${with_long_double_128+set}" = set; then :
+   withval=$with_long_double_128; gcc_cv_target_ldbl128="$with_long_double_128"
+ else
+ 
++      case "$target" in
++	s390*-*-linux-musl*)
++	  gcc_cv_target_ldbl128=yes
++	  ;;
++	powerpc*-*-linux-musl*)
++	  gcc_cv_target_ldbl128=no
++	  ;;
++	*)
++
+ if test $glibc_version_major -gt 2 \
+   || ( test $glibc_version_major -eq 2 && test $glibc_version_minor -ge 4 ); then :
+   gcc_cv_target_ldbl128=yes
+@@ -29320,6 +29329,10 @@ else
+       && gcc_cv_target_ldbl128=yes
+ 
+ fi
++
++	  ;;
++      esac
++
+ fi
+ 
+     ;;
+diff --git a/gcc/configure.ac b/gcc/configure.ac
+index b066cc609e1..6c15ed898c0 100644
+--- a/gcc/configure.ac
++++ b/gcc/configure.ac
+@@ -5971,13 +5971,25 @@ case "$target" in
+     AC_ARG_WITH(long-double-128,
+       [AS_HELP_STRING([--with-long-double-128],
+ 		      [use 128-bit long double by default])],
+-      gcc_cv_target_ldbl128="$with_long_double_128",
++      gcc_cv_target_ldbl128="$with_long_double_128", [
++      case "$target" in
++	s390*-*-linux-musl*)
++	  gcc_cv_target_ldbl128=yes
++	  ;;
++	powerpc*-*-linux-musl*)
++	  gcc_cv_target_ldbl128=no
++	  ;;
++	*)]
+       [GCC_GLIBC_VERSION_GTE_IFELSE([2], [4], [gcc_cv_target_ldbl128=yes], [
+       [gcc_cv_target_ldbl128=no
+       grep '^[ 	]*#[ 	]*define[ 	][ 	]*__LONG_DOUBLE_MATH_OPTIONAL' \
+         $target_header_dir/bits/wordsize.h > /dev/null 2>&1 \
+       && gcc_cv_target_ldbl128=yes
+-      ]])])
++      ]])]
++      [
++	  ;;
++      esac
++      ])
+     ;;
+ esac
+ if test x$gcc_cv_target_ldbl128 = xyes; then
+diff --git a/gcc/config/m68k/linux.h b/gcc/config/m68k/linux.h
+index f584d19e179..a3c215550fe 100644
+--- a/gcc/config/m68k/linux.h
++++ b/gcc/config/m68k/linux.h
+@@ -73,6 +73,9 @@ along with GCC; see the file COPYING3.  If not see
+ 
+ #define GLIBC_DYNAMIC_LINKER "/lib/ld.so.1"
+ 
++#undef MUSL_DYNAMIC_LINKER
++#define MUSL_DYNAMIC_LINKER "/lib/ld-musl-m68k.so.1"
++
+ #undef LINK_SPEC
+ #define LINK_SPEC "-m m68kelf %{shared} \
+   %{!shared: \
+diff --git a/libgcc/config/m68k/linux-unwind.h b/libgcc/config/m68k/linux-unwind.h
+index 395e4b3212a..432b757541c 100644
+--- a/libgcc/config/m68k/linux-unwind.h
++++ b/libgcc/config/m68k/linux-unwind.h
+@@ -37,7 +37,7 @@ struct uw_ucontext {
+ 	stack_t		  uc_stack;
+ 	mcontext_t	  uc_mcontext;
+ 	unsigned long	  uc_filler[80];
+-	__sigset_t	  uc_sigmask;
++	sigset_t	  uc_sigmask;
+ };
+ 
+ #define MD_FALLBACK_FRAME_STATE_FOR m68k_fallback_frame_state
+diff --git a/gcc/common.opt b/gcc/common.opt
+index b52ef0b38c8..0ce5857e01d 100644
+--- a/gcc/common.opt
++++ b/gcc/common.opt
+@@ -3197,11 +3197,11 @@ Driver
+ 
+ no-pie
+ Driver RejectNegative Negative(shared)
+-Don't create a dynamically linked position independent executable.
++Don't create a position independent executable.
+ 
+ pie
+ Driver RejectNegative Negative(no-pie)
+-Create a dynamically linked position independent executable.
++Create a position independent executable.
+ 
+ static-pie
+ Driver RejectNegative Negative(pie)
+diff --git a/gcc/config/gnu-user.h b/gcc/config/gnu-user.h
+index 8620de3e42d..235328a2642 100644
+--- a/gcc/config/gnu-user.h
++++ b/gcc/config/gnu-user.h
+@@ -52,13 +52,12 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ #define GNU_USER_TARGET_STARTFILE_SPEC \
+   "%{shared:; \
+      pg|p|profile:%{static-pie:grcrt1.o%s;:gcrt1.o%s}; \
+-     static:crt1.o%s; \
+-     static-pie:rcrt1.o%s; \
++     static|static-pie:%{" PIE_SPEC ":rcrt1.o%s;:crt1.o%s}; \
+      " PIE_SPEC ":Scrt1.o%s; \
+      :crt1.o%s} \
+    crti.o%s \
+-   %{static:crtbeginT.o%s; \
+-     shared|static-pie|" PIE_SPEC ":crtbeginS.o%s; \
++   %{shared|" PIE_SPEC ":crtbeginS.o%s; \
++     static:crtbeginT.o%s; \
+      :crtbegin.o%s} \
+    %{fvtable-verify=none:%s; \
+      fvtable-verify=preinit:vtv_start_preinit.o%s; \
+@@ -92,8 +91,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+   "%{fvtable-verify=none:%s; \
+      fvtable-verify=preinit:vtv_end_preinit.o%s; \
+      fvtable-verify=std:vtv_end.o%s} \
+-   %{static:crtend.o%s; \
+-     shared|static-pie|" PIE_SPEC ":crtendS.o%s; \
++   %{shared|" PIE_SPEC ":crtendS.o%s; \
+      :crtend.o%s} \
+    crtn.o%s \
+    " CRTOFFLOADEND
+@@ -133,7 +131,7 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ #define LIB_SPEC GNU_USER_TARGET_LIB_SPEC
+ 
+ #if defined(HAVE_LD_EH_FRAME_HDR)
+-#define LINK_EH_SPEC "%{!static|static-pie:--eh-frame-hdr} "
++#define LINK_EH_SPEC "%{!static|" PIE_SPEC ":--eh-frame-hdr} "
+ #endif
+ 
+ #undef LINK_GCC_C_SEQUENCE_SPEC
+diff --git a/gcc/config/rs6000/sysv4.h b/gcc/config/rs6000/sysv4.h
+index bb19d0dcd41..bb2a2324eb0 100644
+--- a/gcc/config/rs6000/sysv4.h
++++ b/gcc/config/rs6000/sysv4.h
+@@ -763,12 +763,12 @@ ENDIAN_SELECT(" -mbig", " -mlittle", DEFAULT_ASM_ENDIAN)
+ #define	STARTFILE_LINUX_SPEC \
+   "%{shared:; \
+      pg|p|profile:gcrt1.o%s; \
+-     static:crt1.o%s; \
+-     static-pie|" PIE_SPEC ":Scrt1.o%s; \
++     static|static-pie:%{" PIE_SPEC ":rcrt1.o%s;:crt1.o%s}; \
++     " PIE_SPEC ":Scrt1.o%s; \
+      :crt1.o%s} \
+    %{mnewlib:ecrti.o%s;:crti.o%s} \
+-   %{static:crtbeginT.o%s; \
+-     shared|static-pie|" PIE_SPEC ":crtbeginS.o%s; \
++   %{shared|" PIE_SPEC ":crtbeginS.o%s; \
++     static:crtbeginT.o%s; \
+      :crtbegin.o%s} \
+    %{fvtable-verify=none:%s; \
+      fvtable-verify=preinit:vtv_start_preinit.o%s; \
+@@ -781,8 +781,7 @@ ENDIAN_SELECT(" -mbig", " -mlittle", DEFAULT_ASM_ENDIAN)
+   "%{fvtable-verify=none:%s; \
+      fvtable-verify=preinit:vtv_end_preinit.o%s; \
+      fvtable-verify=std:vtv_end.o%s} \
+-   %{static:crtend.o%s; \
+-     shared|static-pie|" PIE_SPEC ":crtendS.o%s; \
++   %{shared|" PIE_SPEC ":crtendS.o%s; \
+      :crtend.o%s} \
+    %{mnewlib:ecrtn.o%s;:crtn.o%s} \
+    " CRTOFFLOADEND
+diff --git a/gcc/gcc.c b/gcc/gcc.c
+index eb1610ba8b0..87560afb03c 100644
+--- a/gcc/gcc.c
++++ b/gcc/gcc.c
+@@ -900,7 +900,7 @@ proper position among the other output files.  */
+ #define NO_FPIE_AND_FPIC_SPEC	NO_FPIE_SPEC "|" NO_FPIC_SPEC
+ #define FPIE_OR_FPIC_SPEC	NO_FPIE_AND_FPIC_SPEC ":;"
+ #else
+-#define PIE_SPEC		"pie"
++#define PIE_SPEC		"pie|static-pie"
+ #define FPIE1_SPEC		"fpie"
+ #define NO_FPIE1_SPEC		FPIE1_SPEC ":;"
+ #define FPIE2_SPEC		"fPIE"
+@@ -924,12 +924,12 @@ proper position among the other output files.  */
+ #ifndef LINK_PIE_SPEC
+ #ifdef HAVE_LD_PIE
+ #ifndef LD_PIE_SPEC
+-#define LD_PIE_SPEC "-pie"
++#define LD_PIE_SPEC "-pie %{static|static-pie:--no-dynamic-linker -z text -Bsymbolic}"
+ #endif
+ #else
+ #define LD_PIE_SPEC ""
+ #endif
+-#define LINK_PIE_SPEC "%{static|shared|r:;" PIE_SPEC ":" LD_PIE_SPEC "} "
++#define LINK_PIE_SPEC "%{shared|r:;" PIE_SPEC ":" LD_PIE_SPEC "} "
+ #endif
+ 
+ #ifndef LINK_BUILDID_SPEC
